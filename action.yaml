@@ -46,7 +46,7 @@ runs:
         fetch-depth: 0
 
     - name: Configure AWS credentials from AWS account
-      uses: aws-actions/configure-aws-credentials@v4.0.2
+      uses: aws-actions/configure-aws-credentials@v4.2.1
       with:
         role-to-assume: ${{ inputs.aws-role-arn }}
         aws-region: ${{ inputs.aws-region }}
