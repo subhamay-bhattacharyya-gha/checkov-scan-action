@@ -2,36 +2,26 @@
 
 # 🚀 Checkov Scan
 
-**Checkov Scan** is a GitHub Composite Action that runs a [Checkov](https://www.checkov.io/) scan for security and compliance issues on CloudFormation / Terraform / Kubernetes IaC code etc.
+**Checkov Scan** is a reusable GitHub Composite Action that runs [Checkov](https://www.checkov.io/) scans for security and compliance issues across IaC frameworks like CloudFormation, Terraform, and Kubernetes.
 
 ---
 
 ## 🔍 What It Does
 
-1. **Assumes an AWS IAM Role** using GitHub OIDC.
-2. **Runs Checkov** scan on supported IaC frameworks (CloudFormation, Terraform, Kubernetes, or all).
+1. **Dynamically checks out a release tag** (if provided) or the current branch.
+2. **Runs Checkov** against the specified directory and framework.
+3. **Generates SARIF output** for GitHub code scanning (Security tab).
 
 ---
 
 ## 📦 Inputs
 
-| Name            | Description                                                                 | Required | Default                                                             |
-|-----------------|-----------------------------------------------------------------------------|----------|---------------------------------------------------------------------|
-| `aws-role-arn`  | ARN of the IAM role to assume.                                              | ✅ Yes   | `arn:aws:iam::111122223333:role/github-oidc-role`                  |
-| `aws-region`    | AWS region where resources are deployed.                                    | ✅ Yes   | `us-east-1`                                                         |
-| `iac-dir`  | Directory path where the IaC templates are located.                           | ✅ Yes   | `cfn`                                                               |
-| `iac-framework` | IaC framework for Checkov (`cloudformation`, `terraform`, `kubernetes`, `all`). | ✅ Yes   | `cloudformation`                                                    |
-| `soft-fail`     | If `true`, Checkov scan failures will not fail the pipeline.                | ✅ Yes   | `true`                                                              |
-| `github-token`  | GitHub token for authenticating the workflow.                              | ✅ Yes   |                                                                     |
-
----
-
-## 📤 Outputs
-
-| Name                | Description                              |
-|---------------------|------------------------------------------|
-| `valid-template`    | `true` if the template is valid          |
-| `validation-error`  | Validation error message, if any         |
+| Name             | Description                                                                 |
+|------------------|-----------------------------------------------------------------------------|
+| `release-tag`    | Git release tag to check out. If omitted, defaults to current ref.         |
+| `iac-dir`        | Directory path where the IaC templates are located.                         |
+| `iac-framework`  | IaC framework for Checkov (`cloudformation`, `terraform`, `kubernetes`).   |
+| `soft-fail`      | If `true`, Checkov scan failures will not fail the pipeline.               |
 
 ---
 
@@ -39,18 +29,20 @@
 
 ```yaml
 jobs:
-  validate-template:
+  checkov:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Run Checkov Scan
         uses: subhamay-bhattacharyya-gha/checkov-scan-action@main
         with:
-          aws-role-arn: arn:aws:iam::111122223333:role/github-oidc-role
-          aws-region: us-east-1
-          iac-dir: cfn
-          iac-framework: cloudformation
+          release-tag: v1.0.0
+          iac-dir: iac
+          iac-framework: "cloudformation"
           soft-fail: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+
 ```
 
 ## License
