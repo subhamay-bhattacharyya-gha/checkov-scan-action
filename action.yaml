@@ -1,63 +1,57 @@
-name: 'Checkov Scan'
-description: 'Runs Checkov scan on the specified IaC directory.'
+name: "Reusable Checkov IaC Scan"
+description: "Reusable GitHub Action to run Checkov against a specified IaC directory for security and compliance checks."
 
 inputs:
-  aws-role-arn:
-    description: "ARN of the role to be assumed (e.g., arn:aws:iam::111122223333:role/github-oidc-role)"
-    required: true
-
-  aws-region:
-    description: "AWS region where the services will be deployed (e.g., us-east-1)"
-    required: true
+  release-tag:
+    description: "Git release tag to check out. If omitted, the latest commit on the default branch is used."
+    required: false
+    type: string
 
   iac-dir:
     description: "The directory path of the IAC file."
     required: true
+    type: string
+    default: "iac"
 
   iac-framework:
     description: "IAC Framework - Accepted values: cloudformation, terraform, kubernetes etc."
     required: true
+    type: string
     default: "cloudformation"
 
   soft-fail:
     description: "If true, Checkov scan will not fail the pipeline"
     required: false
+    type: boolean
     default: true
 
-  github-token:
-    description: 'GitHub token (optional, not used currently)'
-    required: false
-
-outputs:
-  valid-template:
-    description: 'Specifies if the template is valid'
-    value: ${{ steps.validate-template.outputs.valid-template }}
-
-  validation-error:
-    description: 'Validation error message if any'
-    value: ${{ steps.validate-template.outputs.validation-error }}
-
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
-    - name: Checkout repository
+    - name: "Set Checkout Ref"
+      id: set-ref
+      shell: bash
+      run: |
+        if [[ -n "${{ inputs.release-tag }}" ]]; then
+          echo "ref=${{ inputs.release-tag }}" >> $GITHUB_OUTPUT
+        else
+          echo "ref=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: "Checkout Repo"
+      id: checkout
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0
+        ref: ${{ steps.set-ref.outputs.ref }}
 
-    - name: Configure AWS credentials from AWS account
-      uses: aws-actions/configure-aws-credentials@v4.2.1
-      with:
-        role-to-assume: ${{ inputs.aws-role-arn }}
-        aws-region: ${{ inputs.aws-region }}
-        role-session-name: github-aws-${{ inputs.iac-framework }}-oidc
-
-    - name: Run Checkov Scan
+    - name: "Run Checkov Scan"
+      id: checkov-scan
       uses: bridgecrewio/checkov-action@master
       with:
         directory: ${{ github.workspace }}/${{ inputs.iac-dir }}
         soft_fail: ${{ inputs.soft-fail }}
-        quiet: true
+        quiet: "true"
         framework: ${{ inputs.iac-framework }}
-        output_format: sarif
-        sarif_output_file: results.sarif  # Output file for SARIF format, must be named as results.sarif for the report action to work
+        # Output file for SARIF format, must be named as results.sarif for the report action to work
+        sarif_output_file: results.sarif
+
