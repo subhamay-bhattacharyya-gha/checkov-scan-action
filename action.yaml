@@ -44,6 +44,13 @@ runs:
       with:
         ref: ${{ steps.set-ref.outputs.ref }}
 
+    - name: Ensure results.sarif is clean
+      run: |
+        if [ -d "results.sarif" ]; then
+          echo "Removing existing results.sarif directory..."
+          rm -rf results.sarif
+        fi
+
     - name: "Run Checkov Scan"
       id: checkov-scan
       uses: bridgecrewio/checkov-action@master
