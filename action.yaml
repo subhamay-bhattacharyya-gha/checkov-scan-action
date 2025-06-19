@@ -44,6 +44,15 @@ runs:
       with:
         ref: ${{ steps.set-ref.outputs.ref }}
 
+    - name: Ensure results.sarif is clean
+      id: clean-results
+      shell: bash
+      run: |
+        if [ -d "results.sarif" ]; then
+          echo "Removing existing results.sarif directory..."
+          rm -rf results.sarif
+        fi
+
     - name: "Run Checkov Scan"
       id: checkov-scan
       uses: bridgecrewio/checkov-action@master
@@ -53,5 +62,4 @@ runs:
         quiet: "true"
         framework: ${{ inputs.iac-framework }}
         # Output file for SARIF format, must be named as results.sarif for the report action to work
-        sarif_output_file: results.sarif
-
+        output_format: "sarif"
