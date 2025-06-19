@@ -53,5 +53,7 @@ runs:
         quiet: "true"
         framework: ${{ inputs.iac-framework }}
         # Output file for SARIF format, must be named as results.sarif for the report action to work
-        sarif_output_file: results.sarif
+        output_format: "sarif"
+        output_file_path: "results.sarif"
+
 
