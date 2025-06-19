@@ -55,6 +55,3 @@ runs:
         # Output file for SARIF format, must be named as results.sarif for the report action to work
         sarif_output_file: results.sarif
 
-    - name: "📋 Summarize and Print Checkov Scan Report with Snippets"
-      id: summarize-report
-      uses: subhamay-bhattacharyya-gha/checkov-report-action@main
