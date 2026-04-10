@@ -25,6 +25,11 @@ inputs:
     type: boolean
     default: true
 
+  github-token:
+    description: "GitHub token used for API calls (pass secrets.GITHUB_TOKEN from the caller workflow)."
+    required: true
+    type: string
+
 runs:
   using: "composite"
   steps:
@@ -53,6 +58,13 @@ runs:
           rm -rf results.sarif
         fi
 
+    - name: Run Terraform Checkov Scan Detector
+      id: checkov-scan-detector
+      uses: subhamay-bhattacharyya-gha/terraform-checkov-scan-detector/.github/actions/tf-scanner@v1.0.0
+      with:
+        terraform_dir: ${{ github.workspace }}/${{ inputs.iac-dir }}
+        github_token: ${{ inputs.github-token }}
+
     - name: "Run Checkov Scan"
       id: checkov-scan
       uses: bridgecrewio/checkov-action@master
@@ -63,3 +75,12 @@ runs:
         framework: ${{ inputs.iac-framework }}
         # Output file for SARIF format, must be named as results.sarif for the report action to work
         output_format: "sarif"
+
+    - name: Upload SARIF file
+      uses: GitHub/codeql-action/upload-sarif@v3
+      # Results are generated only on a success or failure
+      # this is required since GitHub by default won't run the next step
+      # when the previous one has failed. Alternatively, enable soft_fail in checkov action.
+      if: success() || failure()
+      with:
+        sarif_file: results.sarif
