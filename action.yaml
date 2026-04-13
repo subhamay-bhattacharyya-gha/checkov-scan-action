@@ -113,7 +113,11 @@ runs:
         CONTENT=$(curl -s \
           "https://gist.githubusercontent.com/bsubhamay/33218d3610939502b8fe69ee4858c575/raw/enabled-checkov-scans-ids.json")
         echo "Scan ID from Gist: $CONTENT"
-        echo "gist_content=$CONTENT" >> $GITHUB_OUTPUT
+        {
+          echo "gist_content<<GIST_EOF"
+          echo "$CONTENT"
+          echo "GIST_EOF"
+        } >> $GITHUB_OUTPUT
 
     - name: "Print Enabled Checkov Scan IDs"
       id: print_checkov_ids
