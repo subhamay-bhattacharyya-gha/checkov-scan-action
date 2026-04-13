@@ -69,39 +69,93 @@ runs:
           rm -rf results.sarif
         fi
 
-    - name: Run Terraform Checkov Scan Detector
-      id: checkov-scan-detector
-      continue-on-error: true
-      uses: subhamay-bhattacharyya-gha/terraform-checkov-scan-detector/.github/actions/tf-scanner@bug/GHA-0004-fix-resolve-missing-actio
-      with:
-        terraform_dir: ${{ github.workspace }}/${{ inputs.iac-dir }}
-        github_token: ${{ inputs.github-token }}
+    # Custom Checkov Scan Detector step to determine if a scan should be run based on the presence of IaC files in the specified directory.
+    # This will be implemented as a separate action in the future, but for now it's included here as a placeholder to demonstrate the intended functionality.
+    # ------------------
+    # - name: Run Terraform Checkov Scan Detector
+    #   id: checkov-scan-detector
+    #   continue-on-error: true
+    #   uses: subhamay-bhattacharyya-gha/terraform-checkov-scan-detector/.github/actions/tf-scanner@bug/GHA-0004-fix-resolve-missing-actio
+    #   with:
+    #     terraform_dir: ${{ github.workspace }}/${{ inputs.iac-dir }}
+    #     github_token: ${{ inputs.github-token }}
 
-    - name: Debug Checkov Scan Detector Output
+    # - name: Debug Checkov Scan Detector Output
+    #   shell: bash
+    #   env:
+    #     DETECTOR_OUTPUTS: ${{ toJSON(steps.checkov-scan-detector.outputs) }}
+    #   run: |
+    #     echo "::group::checkov-scan-detector outputs"
+    #     echo "outcome: ${{ steps.checkov-scan-detector.outcome }}"
+    #     echo "conclusion: ${{ steps.checkov-scan-detector.conclusion }}"
+    #     echo "All outputs: ${DETECTOR_OUTPUTS}"
+    #     echo "::endgroup::"
+
+    #     echo "## Checkov Scan Detector" >> $GITHUB_STEP_SUMMARY
+    #     echo "" >> $GITHUB_STEP_SUMMARY
+    #     echo "| Property   | Value |" >> $GITHUB_STEP_SUMMARY
+    #     echo "|------------|-------|" >> $GITHUB_STEP_SUMMARY
+    #     echo "| Outcome    | \`${{ steps.checkov-scan-detector.outcome }}\` |" >> $GITHUB_STEP_SUMMARY
+    #     echo "| Conclusion | \`${{ steps.checkov-scan-detector.conclusion }}\` |" >> $GITHUB_STEP_SUMMARY
+    #     echo "" >> $GITHUB_STEP_SUMMARY
+    #     echo "<details>" >> $GITHUB_STEP_SUMMARY
+    #     echo "<summary>All Outputs</summary>" >> $GITHUB_STEP_SUMMARY
+    #     echo "" >> $GITHUB_STEP_SUMMARY
+    #     echo '```json' >> $GITHUB_STEP_SUMMARY
+    #     echo "${DETECTOR_OUTPUTS}" >> $GITHUB_STEP_SUMMARY
+    #     echo '```' >> $GITHUB_STEP_SUMMARY
+    #     echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+    - name: "Retrieve Gist Content"
+      id: pull_gist
       shell: bash
-      env:
-        DETECTOR_OUTPUTS: ${{ toJSON(steps.checkov-scan-detector.outputs) }}
       run: |
-        echo "::group::checkov-scan-detector outputs"
-        echo "outcome: ${{ steps.checkov-scan-detector.outcome }}"
-        echo "conclusion: ${{ steps.checkov-scan-detector.conclusion }}"
-        echo "All outputs: ${DETECTOR_OUTPUTS}"
-        echo "::endgroup::"
+        CONTENT=$(curl -s \
+          "https://gist.githubusercontent.com/bsubhamay/33218d3610939502b8fe69ee4858c575/raw/enabled-checkov-scans-ids.json")
+        echo "Scan ID from Gist: $CONTENT"
+        echo "gist_content=$CONTENT" >> $GITHUB_OUTPUT
 
-        echo "## Checkov Scan Detector" >> $GITHUB_STEP_SUMMARY
+    - name: "Print Enabled Checkov Scan IDs"
+      id: print_checkov_ids
+      shell: bash
+      run: |
+        CONTENT='${{ steps.pull_gist.outputs.gist_content }}'
+        # Extract all check IDs from the nested JSON
+        IDS=$(echo "$CONTENT" | jq -r '.. | arrays | .[]' | sort -u)
+
+        # Install checkov to retrieve check descriptions
+        pip install -q checkov > /dev/null 2>&1
+
+        # Get the full checkov check list
+        CHECKOV_LIST=$(checkov --list 2>/dev/null)
+
+        # Build a single table with all checks
+        echo "## Enabled Checkov Scans" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| Property   | Value |" >> $GITHUB_STEP_SUMMARY
-        echo "|------------|-------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Outcome    | \`${{ steps.checkov-scan-detector.outcome }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| Conclusion | \`${{ steps.checkov-scan-detector.conclusion }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| # | Cloud | Service | Check Id | Description |" >> $GITHUB_STEP_SUMMARY
+        echo "|--:|-------|---------|----------|-------------|" >> $GITHUB_STEP_SUMMARY
+
+        COUNT=0
+        for CLOUD in $(echo "$CONTENT" | jq -r 'keys[]'); do
+          for SERVICE in $(echo "$CONTENT" | jq -r --arg c "$CLOUD" '.[$c] | keys[]'); do
+            for ID in $(echo "$CONTENT" | jq -r --arg c "$CLOUD" --arg s "$SERVICE" '.[$c][$s][]'); do
+              DESC=$(echo "$CHECKOV_LIST" | grep "$ID" | head -1 | sed "s/.*${ID}[[:space:]]*//" | sed 's/|//g' | xargs)
+              if [ -z "$DESC" ]; then
+                DESC="N/A"
+              fi
+              COUNT=$((COUNT + 1))
+              echo "| ${COUNT} | ${CLOUD} | ${SERVICE} | \`${ID}\` | ${DESC} |" >> $GITHUB_STEP_SUMMARY
+            done
+          done
+        done
+
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "<details>" >> $GITHUB_STEP_SUMMARY
-        echo "<summary>All Outputs</summary>" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo '```json' >> $GITHUB_STEP_SUMMARY
-        echo "${DETECTOR_OUTPUTS}" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        echo "</details>" >> $GITHUB_STEP_SUMMARY
+        echo "**Total: ${COUNT} check(s) enabled**" >> $GITHUB_STEP_SUMMARY
+
+        # Build comma-separated list of all check IDs
+        CHECK_IDS=$(echo "$CONTENT" | jq -r '[.. | arrays | .[]] | unique | join(",")')
+        echo "check_ids=$CHECK_IDS" >> $GITHUB_OUTPUT
+        echo "Enabled Check IDs: $CHECK_IDS"
 
     - name: "Run Checkov Scan"
       id: checkov-scan
@@ -111,6 +165,7 @@ runs:
         soft_fail: ${{ inputs.soft-fail }}
         quiet: "true"
         framework: ${{ inputs.iac-framework }}
+        check: ${{ steps.print_checkov_ids.outputs.check_ids }}
         # Output file for SARIF format, must be named as results.sarif for the report action to work
         output_format: "sarif"
         output_file_path: "."
