@@ -88,6 +88,21 @@ runs:
         echo "All outputs: ${DETECTOR_OUTPUTS}"
         echo "::endgroup::"
 
+        echo "## Checkov Scan Detector" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Property   | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|------------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Outcome    | \`${{ steps.checkov-scan-detector.outcome }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Conclusion | \`${{ steps.checkov-scan-detector.conclusion }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "<details>" >> $GITHUB_STEP_SUMMARY
+        echo "<summary>All Outputs</summary>" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo '```json' >> $GITHUB_STEP_SUMMARY
+        echo "${DETECTOR_OUTPUTS}" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "</details>" >> $GITHUB_STEP_SUMMARY
+
     - name: "Run Checkov Scan"
       id: checkov-scan
       uses: bridgecrewio/checkov-action@master
