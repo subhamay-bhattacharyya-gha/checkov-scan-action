@@ -174,7 +174,7 @@ runs:
         download_external_modules: "true"
         # Output file for SARIF format, must be named as results.sarif for the report action to work
         output_format: "sarif"
-        output_file_path: "."
+        output_file_path: ${{ github.workspace }}
 
     - name: Locate SARIF file
       id: locate-sarif
