@@ -36,9 +36,20 @@ runs:
     - name: "Set Checkout Ref"
       id: set-ref
       shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
       run: |
-        if [[ -n "${{ inputs.release-tag }}" ]]; then
-          echo "ref=${{ inputs.release-tag }}" >> $GITHUB_OUTPUT
+        REPO="${GITHUB_REPOSITORY}"
+        TAG="${{ inputs.release-tag }}"
+        if [[ -n "${TAG}" ]]; then
+          # Check if the ref exists as a tag or branch in the repo
+          if git ls-remote --tags --heads "https://github.com/${REPO}.git" "${TAG}" | grep -q "${TAG}"; then
+            echo "Ref '${TAG}' found in ${REPO}."
+            echo "ref=${TAG}" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::Ref '${TAG}' does not exist in ${REPO}. Falling back to '${GITHUB_REF_NAME}'."
+            echo "ref=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          fi
         else
           echo "ref=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
         fi
