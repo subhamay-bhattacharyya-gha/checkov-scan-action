@@ -143,7 +143,7 @@ runs:
         for CLOUD in $(echo "$CONTENT" | jq -r 'keys[]'); do
           for SERVICE in $(echo "$CONTENT" | jq -r --arg c "$CLOUD" '.[$c] | keys[]'); do
             for ID in $(echo "$CONTENT" | jq -r --arg c "$CLOUD" --arg s "$SERVICE" '.[$c][$s][]'); do
-              DESC=$(echo "$CHECKOV_LIST" | grep "$ID" | head -1 | sed "s/.*${ID}[[:space:]]*//" | sed 's/|//g' | xargs)
+              DESC=$(echo "$CHECKOV_LIST" | grep "$ID" | sed -n "1s/.*${ID}[[:space:]]*//p" | sed 's/|//g' | xargs)
               if [ -z "$DESC" ]; then
                 DESC="N/A"
               fi
