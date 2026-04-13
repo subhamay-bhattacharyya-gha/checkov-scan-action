@@ -79,11 +79,13 @@ runs:
 
     - name: Debug Checkov Scan Detector Output
       shell: bash
+      env:
+        DETECTOR_OUTPUTS: ${{ toJSON(steps.checkov-scan-detector.outputs) }}
       run: |
         echo "::group::checkov-scan-detector outputs"
         echo "outcome: ${{ steps.checkov-scan-detector.outcome }}"
         echo "conclusion: ${{ steps.checkov-scan-detector.conclusion }}"
-        echo "All outputs: ${{ toJSON(steps.checkov-scan-detector.outputs) }}"
+        echo "All outputs: ${DETECTOR_OUTPUTS}"
         echo "::endgroup::"
 
     - name: "Run Checkov Scan"
@@ -101,11 +103,13 @@ runs:
     - name: Debug Checkov Scan Output
       if: success() || failure()
       shell: bash
+      env:
+        SCAN_OUTPUTS: ${{ toJSON(steps.checkov-scan.outputs) }}
       run: |
         echo "::group::checkov-scan outputs"
         echo "outcome: ${{ steps.checkov-scan.outcome }}"
         echo "conclusion: ${{ steps.checkov-scan.conclusion }}"
-        echo "All outputs: ${{ toJSON(steps.checkov-scan.outputs) }}"
+        echo "All outputs: ${SCAN_OUTPUTS}"
         echo "results.sarif exists: $(test -f results.sarif && echo 'yes' || echo 'no')"
         if [ -f results.sarif ]; then
           echo "results.sarif size: $(wc -c < results.sarif) bytes"
