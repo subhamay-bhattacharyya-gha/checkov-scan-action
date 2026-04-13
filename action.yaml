@@ -130,8 +130,9 @@ runs:
         # Install checkov to retrieve check descriptions
         pip install -q checkov > /dev/null 2>&1
 
-        # Get the full checkov check list
-        CHECKOV_LIST=$(checkov --list 2>/dev/null)
+        # Get the checkov check list filtered by framework
+        FRAMEWORK="${{ inputs.iac-framework }}"
+        CHECKOV_LIST=$(checkov --list --framework "$FRAMEWORK" 2>/dev/null)
 
         # Build a single table with all checks
         echo "## Enabled Checkov Scans" >> $GITHUB_STEP_SUMMARY
@@ -175,6 +176,37 @@ runs:
         output_format: "sarif"
         output_file_path: "."
 
+    - name: Locate SARIF file
+      id: locate-sarif
+      if: success() || failure()
+      shell: bash
+      run: |
+        # Checkov may write the SARIF file to the container workdir or $GITHUB_WORKSPACE
+        SARIF_FILE=""
+        for CANDIDATE in \
+          "${{ github.workspace }}/results.sarif" \
+          "./results.sarif" \
+          "${{ github.workspace }}/${{ inputs.iac-dir }}/results.sarif"; do
+          if [ -f "$CANDIDATE" ]; then
+            SARIF_FILE="$CANDIDATE"
+            break
+          fi
+        done
+
+        # Fallback: search the workspace
+        if [ -z "$SARIF_FILE" ]; then
+          SARIF_FILE=$(find "${{ github.workspace }}" -name "results.sarif" -type f 2>/dev/null | head -1)
+        fi
+
+        if [ -n "$SARIF_FILE" ]; then
+          echo "sarif_path=$SARIF_FILE" >> $GITHUB_OUTPUT
+          echo "found=true" >> $GITHUB_OUTPUT
+          echo "SARIF file found: $SARIF_FILE ($(wc -c < "$SARIF_FILE") bytes)"
+        else
+          echo "found=false" >> $GITHUB_OUTPUT
+          echo "::warning::SARIF file not found"
+        fi
+
     - name: Debug Checkov Scan Output
       if: success() || failure()
       shell: bash
@@ -185,18 +217,17 @@ runs:
         echo "outcome: ${{ steps.checkov-scan.outcome }}"
         echo "conclusion: ${{ steps.checkov-scan.conclusion }}"
         echo "All outputs: ${SCAN_OUTPUTS}"
-        echo "results.sarif exists: $(test -f results.sarif && echo 'yes' || echo 'no')"
-        if [ -f results.sarif ]; then
-          echo "results.sarif size: $(wc -c < results.sarif) bytes"
+        echo "SARIF found: ${{ steps.locate-sarif.outputs.found }}"
+        echo "SARIF path: ${{ steps.locate-sarif.outputs.sarif_path }}"
+        if [ -f "${{ steps.locate-sarif.outputs.sarif_path }}" ]; then
           echo "results.sarif preview (first 50 lines):"
-          head -50 results.sarif
+          head -50 "${{ steps.locate-sarif.outputs.sarif_path }}"
         fi
         echo "::endgroup::"
 
     - name: Upload SARIF file
       uses: github/codeql-action/upload-sarif@v4
-      # Upload only when the SARIF file was actually produced by the Checkov scan.
-      if: (success() || failure()) && hashFiles('results.sarif') != ''
+      if: (success() || failure()) && steps.locate-sarif.outputs.found == 'true'
       with:
-        sarif_file: results.sarif
+        sarif_file: ${{ steps.locate-sarif.outputs.sarif_path }}
         token: ${{ inputs.github-token }}
