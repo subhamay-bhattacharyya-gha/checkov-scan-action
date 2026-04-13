@@ -168,13 +168,41 @@ runs:
       with:
         directory: ${{ github.workspace }}/${{ inputs.iac-dir }}
         soft_fail: ${{ inputs.soft-fail }}
-        quiet: "true"
+        quiet: "false"
         framework: ${{ inputs.iac-framework }}
         check: ${{ steps.print_checkov_ids.outputs.check_ids }}
         download_external_modules: "true"
         # Output file for SARIF format, must be named as results.sarif for the report action to work
         output_format: "sarif"
         output_file_path: /github/workspace
+
+    - name: Ensure SARIF file exists
+      if: success() || failure()
+      shell: bash
+      run: |
+        SARIF="${{ github.workspace }}/results.sarif"
+        if [ ! -f "$SARIF" ]; then
+          echo "::warning::Checkov did not produce results.sarif — creating minimal SARIF file"
+          cat > "$SARIF" <<'SARIF_EOF'
+        {
+          "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+          "version": "2.1.0",
+          "runs": [
+            {
+              "tool": {
+                "driver": {
+                  "name": "Checkov",
+                  "rules": []
+                }
+              },
+              "results": []
+            }
+          ]
+        }
+        SARIF_EOF
+        else
+          echo "results.sarif found ($(wc -c < "$SARIF") bytes)"
+        fi
 
     - name: Locate SARIF file
       id: locate-sarif
