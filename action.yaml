@@ -17,7 +17,7 @@ inputs:
     description: "IAC Framework - Accepted values: cloudformation, terraform, kubernetes etc."
     required: true
     type: string
-    default: "cloudformation"
+    default: "terraform"
 
   soft-fail:
     description: "If true, Checkov scan will not fail the pipeline"
