@@ -24,7 +24,7 @@
 |----------------|----------|------------------|------------------------------------------------------------------------------------------|
 | `release-tag`  | No       | —                | Git release tag to check out. If omitted or not found, defaults to current branch ref.   |
 | `iac-dir`      | Yes      | `iac`            | Directory path where the IaC templates are located.                                      |
-| `iac-framework`| Yes      | `cloudformation` | IaC framework for Checkov (`cloudformation`, `terraform`, `kubernetes`, etc.).            |
+| `iac-framework`| Yes      | `cloudformation` | IaC framework for Checkov (`cloudformation`, `terraform`, `kubernetes`, etc.).           |
 | `soft-fail`    | No       | `true`           | If `true`, Checkov scan failures will not fail the pipeline.                             |
 | `github-token` | Yes      | —                | GitHub token used for API calls. Pass `secrets.GITHUB_TOKEN` from the caller workflow.   |
 
@@ -71,7 +71,7 @@ jobs:
 | Checkout Repo                   | Checks out the repository at the resolved ref.                                     |
 | Clean SARIF Results             | Removes any pre-existing `results.sarif` to ensure a clean scan.                   |
 | Terraform Checkov Scan Detector | Runs an optional pre-scan detector (non-blocking).                                 |
-| Run Checkov Scan                | Executes Checkov against the specified IaC directory with SARIF output.             |
+| Run Checkov Scan                | Executes Checkov against the specified IaC directory with SARIF output.            |
 | Upload SARIF file               | Uploads `results.sarif` to GitHub Code Scanning (only if the file was generated).  |
 
 ---

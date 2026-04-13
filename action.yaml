@@ -72,7 +72,7 @@ runs:
     - name: Run Terraform Checkov Scan Detector
       id: checkov-scan-detector
       continue-on-error: true
-      uses: subhamay-bhattacharyya-gha/terraform-checkov-scan-detector/.github/actions/tf-scanner@v1.0.0
+      uses: subhamay-bhattacharyya-gha/terraform-checkov-scan-detector/.github/actions/tf-scanner@bug/GHA-0004-fix-resolve-missing-actio
       with:
         terraform_dir: ${{ github.workspace }}/${{ inputs.iac-dir }}
         github_token: ${{ inputs.github-token }}
