@@ -65,6 +65,15 @@ runs:
         terraform_dir: ${{ github.workspace }}/${{ inputs.iac-dir }}
         github_token: ${{ inputs.github-token }}
 
+    - name: Debug Checkov Scan Detector Output
+      shell: bash
+      run: |
+        echo "::group::checkov-scan-detector outputs"
+        echo "outcome: ${{ steps.checkov-scan-detector.outcome }}"
+        echo "conclusion: ${{ steps.checkov-scan-detector.conclusion }}"
+        echo "All outputs: ${{ toJSON(steps.checkov-scan-detector.outputs) }}"
+        echo "::endgroup::"
+
     - name: "Run Checkov Scan"
       id: checkov-scan
       uses: bridgecrewio/checkov-action@master
@@ -77,12 +86,26 @@ runs:
         output_format: "sarif"
         output_file_path: "."
 
+    - name: Debug Checkov Scan Output
+      if: success() || failure()
+      shell: bash
+      run: |
+        echo "::group::checkov-scan outputs"
+        echo "outcome: ${{ steps.checkov-scan.outcome }}"
+        echo "conclusion: ${{ steps.checkov-scan.conclusion }}"
+        echo "All outputs: ${{ toJSON(steps.checkov-scan.outputs) }}"
+        echo "results.sarif exists: $(test -f results.sarif && echo 'yes' || echo 'no')"
+        if [ -f results.sarif ]; then
+          echo "results.sarif size: $(wc -c < results.sarif) bytes"
+          echo "results.sarif preview (first 50 lines):"
+          head -50 results.sarif
+        fi
+        echo "::endgroup::"
+
     - name: Upload SARIF file
       uses: github/codeql-action/upload-sarif@v4
-      # Results are generated only on a success or failure
-      # this is required since GitHub by default won't run the next step
-      # when the previous one has failed. Alternatively, enable soft_fail in checkov action.
-      if: success() || failure()
+      # Upload only when the SARIF file was actually produced by the Checkov scan.
+      if: (success() || failure()) && hashFiles('results.sarif') != ''
       with:
         sarif_file: results.sarif
         token: ${{ inputs.github-token }}
