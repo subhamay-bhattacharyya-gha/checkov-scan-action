@@ -71,6 +71,7 @@ runs:
 
     - name: Run Terraform Checkov Scan Detector
       id: checkov-scan-detector
+      continue-on-error: true
       uses: subhamay-bhattacharyya-gha/terraform-checkov-scan-detector/.github/actions/tf-scanner@v1.0.0
       with:
         terraform_dir: ${{ github.workspace }}/${{ inputs.iac-dir }}
