@@ -20,15 +20,15 @@
 
 ## 📦 Inputs
 
-| Name               | Required | Default            | Description                                                                                                                         |
-|--------------------|----------|--------------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| `release-tag`      | No       | —                  | **Deprecated, ignored.** Retained so callers don't hit "Unexpected input(s)"; remove from your workflow — caller now owns `actions/checkout`. |
-| `iac-dir`          | Yes      | `iac`              | Directory containing the IaC templates. For directory scans, this is what gets scanned. For `plan-file` scans, this is also used as the source dir for plan enrichment (source file paths / line numbers / code snippets in the SARIF). |
-| `iac-framework`    | Yes      | `terraform`        | IaC framework for Checkov (`cloudformation`, `terraform`, `kubernetes`, etc.). Ignored when `plan-file` is set.                     |
-| `plan-file`        | No       | —                  | Path (relative to the workspace) to a Terraform plan JSON. If set, Checkov scans this file using framework `terraform_plan`.        |
-| `output-file-path` | No       | `/github/workspace`| Directory where Checkov writes `results.sarif`. Must be accessible from inside the Checkov container.                               |
-| `soft-fail`        | No       | `true`             | If `true`, Checkov scan failures will not fail the pipeline.                                                                        |
-| `github-token`     | Yes      | —                  | GitHub token used for API calls. Pass `secrets.GITHUB_TOKEN` from the caller workflow.                                              |
+| Name               | Required | Default             | Description                                                                                                                                                                                                                             |
+| ------------------ | -------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release-tag`      | No       | —                   | **Deprecated, ignored.** Retained so callers don't hit "Unexpected input(s)"; remove from your workflow — caller now owns `actions/checkout`.                                                                                           |
+| `iac-dir`          | Yes      | `iac`               | Directory containing the IaC templates. For directory scans, this is what gets scanned. For `plan-file` scans, this is also used as the source dir for plan enrichment (source file paths / line numbers / code snippets in the SARIF). |
+| `iac-framework`    | Yes      | `terraform`         | IaC framework for Checkov (`cloudformation`, `terraform`, `kubernetes`, etc.). Ignored when `plan-file` is set.                                                                                                                         |
+| `plan-file`        | No       | —                   | Path (relative to the workspace) to a Terraform plan JSON. If set, Checkov scans this file using framework `terraform_plan`.                                                                                                            |
+| `output-file-path` | No       | `/github/workspace` | Directory where Checkov writes `results.sarif`. Must be accessible from inside the Checkov container.                                                                                                                                   |
+| `soft-fail`        | No       | `true`              | If `true`, Checkov scan failures will not fail the pipeline.                                                                                                                                                                            |
+| `github-token`     | Yes      | —                   | GitHub token used for API calls. Pass `secrets.GITHUB_TOKEN` from the caller workflow.                                                                                                                                                  |
 
 ---
 
