@@ -20,13 +20,15 @@
 
 ## 📦 Inputs
 
-| Name           | Required | Default          | Description                                                                              |
-|----------------|----------|------------------|------------------------------------------------------------------------------------------|
-| `release-tag`  | No       | —                | Git release tag to check out. If omitted or not found, defaults to current branch ref.   |
-| `iac-dir`      | Yes      | `iac`            | Directory path where the IaC templates are located.                                      |
-| `iac-framework`| Yes      | `cloudformation` | IaC framework for Checkov (`cloudformation`, `terraform`, `kubernetes`, etc.).           |
-| `soft-fail`    | No       | `true`           | If `true`, Checkov scan failures will not fail the pipeline.                             |
-| `github-token` | Yes      | —                | GitHub token used for API calls. Pass `secrets.GITHUB_TOKEN` from the caller workflow.   |
+| Name               | Required | Default            | Description                                                                                                                         |
+|--------------------|----------|--------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| `release-tag`      | No       | —                  | Git release tag to check out. If omitted or not found, defaults to current branch ref.                                              |
+| `iac-dir`          | Yes      | `iac`              | Directory path where the IaC templates are located. Ignored when `plan-file` is set.                                                |
+| `iac-framework`    | Yes      | `terraform`        | IaC framework for Checkov (`cloudformation`, `terraform`, `kubernetes`, etc.). Ignored when `plan-file` is set.                     |
+| `plan-file`        | No       | —                  | Path (relative to the workspace) to a Terraform plan JSON. If set, Checkov scans this file using framework `terraform_plan`.        |
+| `output-file-path` | No       | `/github/workspace`| Directory where Checkov writes `results.sarif`. Must be accessible from inside the Checkov container.                               |
+| `soft-fail`        | No       | `true`             | If `true`, Checkov scan failures will not fail the pipeline.                                                                        |
+| `github-token`     | Yes      | —                  | GitHub token used for API calls. Pass `secrets.GITHUB_TOKEN` from the caller workflow.                                              |
 
 ---
 
@@ -42,7 +44,9 @@ permissions:
 
 ---
 
-## 🛠 Usage Example
+## 🛠 Usage Examples
+
+### 1. Scan an IaC directory (Terraform / CloudFormation / Kubernetes)
 
 ```yaml
 jobs:
@@ -56,9 +60,56 @@ jobs:
         uses: subhamay-bhattacharyya-gha/checkov-scan-action@main
         with:
           iac-dir: infra/platform/tf
-          iac-framework: "terraform"
+          iac-framework: terraform
           soft-fail: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### 2. Scan a Terraform plan JSON file
+
+Scanning the plan output is more accurate than a directory scan because Checkov
+only reports on resources that actually appear in the plan (respecting
+`count`, `for_each`, variable values, and unchanged resources).
+
+```yaml
+jobs:
+  checkov:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Generate plan JSON
+        working-directory: infra/platform/tf
+        run: |
+          terraform init -input=false
+          terraform plan -out=tfplan.binary -input=false
+          terraform show -json tfplan.binary > tfplan.json
+
+      - name: Run Checkov Scan against plan
+        uses: subhamay-bhattacharyya-gha/checkov-scan-action@main
+        with:
+          plan-file: infra/platform/tf/tfplan.json
+          soft-fail: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+When `plan-file` is provided, `iac-dir` and `iac-framework` are ignored and
+Checkov runs with `framework=terraform_plan`.
+
+### 3. Custom SARIF output location
+
+```yaml
+- uses: subhamay-bhattacharyya-gha/checkov-scan-action@main
+  with:
+    iac-dir: infra/platform/tf
+    iac-framework: terraform
+    output-file-path: /github/workspace/reports
+    github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ---

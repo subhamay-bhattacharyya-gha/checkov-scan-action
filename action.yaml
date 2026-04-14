@@ -19,6 +19,18 @@ inputs:
     type: string
     default: "terraform"
 
+  plan-file:
+    description: "Path (relative to the workspace) to a Terraform plan JSON file. If set, Checkov scans this file with framework 'terraform_plan' instead of scanning 'iac-dir'."
+    required: false
+    type: string
+    default: ""
+
+  output-file-path:
+    description: "Directory where Checkov writes results.sarif. Must be accessible from inside the Checkov container; defaults to /github/workspace (the runner workspace mount)."
+    required: false
+    type: string
+    default: "/github/workspace"
+
   soft-fail:
     description: "If true, Checkov scan will not fail the pipeline"
     required: false
@@ -130,8 +142,13 @@ runs:
         # Install checkov to retrieve check descriptions
         pip install -q checkov > /dev/null 2>&1
 
-        # Get the checkov check list filtered by framework
-        FRAMEWORK="${{ inputs.iac-framework }}"
+        # Get the checkov check list filtered by framework. When a plan file is used,
+        # list against the underlying 'terraform' framework (terraform_plan shares the catalog).
+        if [[ -n "${{ inputs.plan-file }}" ]]; then
+          FRAMEWORK="terraform"
+        else
+          FRAMEWORK="${{ inputs.iac-framework }}"
+        fi
         CHECKOV_LIST=$(checkov --list --framework "$FRAMEWORK" 2>/dev/null)
 
         # Build a single table with all checks
@@ -166,15 +183,18 @@ runs:
       id: checkov-scan
       uses: bridgecrewio/checkov-action@master
       with:
-        directory: ${{ github.workspace }}/${{ inputs.iac-dir }}
+        # When plan-file is provided, scan the plan JSON with framework=terraform_plan;
+        # otherwise fall back to a directory scan against iac-dir with the configured framework.
+        file: ${{ inputs.plan-file != '' && format('{0}/{1}', github.workspace, inputs.plan-file) || '' }}
+        directory: ${{ inputs.plan-file == '' && format('{0}/{1}', github.workspace, inputs.iac-dir) || '' }}
+        framework: ${{ inputs.plan-file != '' && 'terraform_plan' || inputs.iac-framework }}
         soft_fail: ${{ inputs.soft-fail }}
         quiet: "false"
-        framework: ${{ inputs.iac-framework }}
         check: ${{ steps.print_checkov_ids.outputs.check_ids }}
         download_external_modules: "true"
         # Output file for SARIF format, must be named as results.sarif for the report action to work
         output_format: "sarif"
-        output_file_path: /github/workspace
+        output_file_path: ${{ inputs.output-file-path }}
 
     - name: Ensure SARIF file exists
       if: success() || failure()
