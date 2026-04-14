@@ -10,11 +10,11 @@
 
 ## 🔍 What It Does
 
-1. **Validates the checkout ref** — verifies the provided release tag exists in the repo; falls back to the current branch if not found.
-2. **Checks out the repository** at the validated ref.
-3. **Runs Terraform Checkov Scan Detector** to identify Terraform-specific scan targets (optional, non-blocking).
-4. **Runs Checkov** against the specified directory and framework.
-5. **Generates SARIF output** and uploads it to GitHub Code Scanning (Security tab) via `github/codeql-action/upload-sarif@v4`.
+1. **Pulls the enabled check-ID catalog** from a central gist and renders it to the job summary.
+2. **Runs Checkov** against the specified directory (or plan JSON file) and framework.
+3. **Generates SARIF output** and uploads it to GitHub Code Scanning (Security tab) via `github/codeql-action/upload-sarif@v5`.
+
+> **Caller responsibility:** this action does **not** run `actions/checkout`. Your workflow must check out the repo (and download any plan-file artifact) **before** invoking this action. An inner checkout would `git clean -ffdx` the workspace and delete downloaded artifacts.
 
 ---
 
@@ -22,7 +22,6 @@
 
 | Name               | Required | Default            | Description                                                                                                                         |
 |--------------------|----------|--------------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| `release-tag`      | No       | —                  | Git release tag to check out. If omitted or not found, defaults to current branch ref.                                              |
 | `iac-dir`          | Yes      | `iac`              | Directory path where the IaC templates are located. Ignored when `plan-file` is set.                                                |
 | `iac-framework`    | Yes      | `terraform`        | IaC framework for Checkov (`cloudformation`, `terraform`, `kubernetes`, etc.). Ignored when `plan-file` is set.                     |
 | `plan-file`        | No       | —                  | Path (relative to the workspace) to a Terraform plan JSON. If set, Checkov scans this file using framework `terraform_plan`.        |
@@ -56,6 +55,8 @@ jobs:
       contents: read
       security-events: write
     steps:
+      - uses: actions/checkout@v6
+
       - name: Run Checkov Scan
         uses: subhamay-bhattacharyya-gha/checkov-scan-action@main
         with:
@@ -116,14 +117,16 @@ Checkov runs with `framework=terraform_plan`.
 
 ## 📋 Action Workflow Steps
 
-| Step                            | Description                                                                        |
-|---------------------------------|------------------------------------------------------------------------------------|
-| Set Checkout Ref                | Validates the `release-tag` ref exists; falls back to current branch if not found. |
-| Checkout Repo                   | Checks out the repository at the resolved ref.                                     |
-| Clean SARIF Results             | Removes any pre-existing `results.sarif` to ensure a clean scan.                   |
-| Terraform Checkov Scan Detector | Runs an optional pre-scan detector (non-blocking).                                 |
-| Run Checkov Scan                | Executes Checkov against the specified IaC directory with SARIF output.            |
-| Upload SARIF file               | Uploads `results.sarif` to GitHub Code Scanning (only if the file was generated).  |
+| Step                            | Description                                                                          |
+|---------------------------------|--------------------------------------------------------------------------------------|
+| Debug: Print Action Inputs      | Prints resolved inputs; dumps the plan JSON when `plan-file` is set.                 |
+| Clean SARIF Results             | Removes any pre-existing `results.sarif` to ensure a clean scan.                     |
+| Retrieve Gist Content           | Pulls the enabled-check-ID catalog from a central gist.                              |
+| Print Enabled Checkov Scan IDs  | Renders the enabled checks to the job summary and builds the `--check` argument.     |
+| Run Checkov Scan                | Executes Checkov against the IaC directory, or the plan JSON, with SARIF output.     |
+| Ensure SARIF file exists        | Writes a minimal empty-results SARIF if Checkov did not produce one.                 |
+| Locate SARIF file               | Probes common output locations and falls back to a workspace-wide `find`.            |
+| Upload SARIF file               | Uploads `results.sarif` to GitHub Code Scanning.                                     |
 
 ---
 
