@@ -2,6 +2,12 @@ name: "Reusable Checkov IaC Scan"
 description: "Reusable GitHub Action to run Checkov against a specified IaC directory for security and compliance checks."
 
 inputs:
+  release-tag:
+    description: "DEPRECATED and ignored. This action no longer runs its own actions/checkout (doing so wiped downloaded plan-file artifacts). The caller is responsible for checkout. The input is retained only to avoid 'Unexpected input(s)' warnings in callers that still pass it; remove it from your workflow when convenient."
+    required: false
+    type: string
+    default: ""
+
   iac-dir:
     description: "The directory path of the IAC file."
     required: true
@@ -52,6 +58,9 @@ runs:
       shell: bash
       run: |
         echo "::group::Action inputs"
+        if [[ -n "${{ inputs.release-tag }}" ]]; then
+          echo "::warning::'release-tag' input is deprecated and ignored. Remove it from the caller workflow; checkout is now the caller's responsibility."
+        fi
         echo "iac-dir:           ${{ inputs.iac-dir }}"
         echo "iac-framework:     ${{ inputs.iac-framework }}"
         echo "plan-file:         ${{ inputs.plan-file }}"
@@ -201,43 +210,46 @@ runs:
         output_format: "sarif"
         output_file_path: ${{ inputs.output-file-path }}
 
-    - name: Ensure SARIF file exists
+    - name: "Debug: List Checkov output directory"
       if: success() || failure()
       shell: bash
       run: |
-        SARIF="${{ github.workspace }}/results.sarif"
-        if [ ! -f "$SARIF" ]; then
-          echo "::warning::Checkov did not produce results.sarif — creating minimal SARIF file"
-          cat > "$SARIF" <<'SARIF_EOF'
-        {
-          "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
-          "version": "2.1.0",
-          "runs": [
-            {
-              "tool": {
-                "driver": {
-                  "name": "Checkov",
-                  "rules": []
-                }
-              },
-              "results": []
-            }
-          ]
-        }
-        SARIF_EOF
-        else
-          echo "results.sarif found ($(wc -c < "$SARIF") bytes)"
+        OUT="${{ inputs.output-file-path }}"
+        # /github/workspace inside the checkov container maps to $GITHUB_WORKSPACE on the runner.
+        if [[ "${OUT}" == /github/workspace* ]]; then
+          OUT="${{ github.workspace }}${OUT#/github/workspace}"
         fi
+        echo "::group::Contents of ${OUT}"
+        ls -la "${OUT}" 2>/dev/null || echo "(directory does not exist)"
+        if [[ -d "${OUT}/results_sarif" ]]; then
+          echo "--- results_sarif/ ---"
+          ls -la "${OUT}/results_sarif"
+        fi
+        echo "--- workspace root ---"
+        ls -la "${{ github.workspace }}"
+        echo "::endgroup::"
 
     - name: Locate SARIF file
       id: locate-sarif
       if: success() || failure()
       shell: bash
       run: |
-        # Checkov may write the SARIF file to the container workdir or $GITHUB_WORKSPACE
+        # bridgecrewio/checkov-action invokes `checkov -o sarif --output-file-path <dir>`,
+        # which writes to <dir>/results_sarif/results.sarif (format-named subdirectory).
+        # Probe that location first, then flat fallbacks, then a workspace-wide find.
+        OUT="${{ inputs.output-file-path }}"
+        OUT_RUNNER="${OUT}"
+        if [[ "${OUT_RUNNER}" == /github/workspace* ]]; then
+          OUT_RUNNER="${{ github.workspace }}${OUT_RUNNER#/github/workspace}"
+        fi
+
         SARIF_FILE=""
         for CANDIDATE in \
+          "${OUT_RUNNER}/results_sarif/results.sarif" \
+          "${OUT_RUNNER}/results.sarif" \
+          "${{ github.workspace }}/results_sarif/results.sarif" \
           "${{ github.workspace }}/results.sarif" \
+          "./results_sarif/results.sarif" \
           "./results.sarif" \
           "${{ github.workspace }}/${{ inputs.iac-dir }}/results.sarif"; do
           if [ -f "$CANDIDATE" ]; then
@@ -246,18 +258,42 @@ runs:
           fi
         done
 
-        # Fallback: search the workspace
+        # Fallback: any results.sarif anywhere under the workspace
         if [ -z "$SARIF_FILE" ]; then
           SARIF_FILE=$(find "${{ github.workspace }}" -name "results.sarif" -type f 2>/dev/null | head -1)
         fi
 
         if [ -n "$SARIF_FILE" ]; then
-          echo "sarif_path=$SARIF_FILE" >> $GITHUB_OUTPUT
+          # Normalize to ${{ github.workspace }}/results.sarif so downstream steps
+          # (and the codeql upload action, which prefers paths under the workspace)
+          # have a stable location.
+          CANONICAL="${{ github.workspace }}/results.sarif"
+          if [ "$SARIF_FILE" != "$CANONICAL" ]; then
+            cp "$SARIF_FILE" "$CANONICAL"
+            echo "Copied $SARIF_FILE -> $CANONICAL"
+          fi
+          RESULT_COUNT=$(jq '[.runs[].results[]] | length' "$CANONICAL" 2>/dev/null || echo "?")
+          echo "sarif_path=$CANONICAL" >> $GITHUB_OUTPUT
           echo "found=true" >> $GITHUB_OUTPUT
-          echo "SARIF file found: $SARIF_FILE ($(wc -c < "$SARIF_FILE") bytes)"
+          echo "SARIF file found: $CANONICAL ($(wc -c < "$CANONICAL") bytes, ${RESULT_COUNT} results)"
         else
-          echo "found=false" >> $GITHUB_OUTPUT
-          echo "::warning::SARIF file not found"
+          echo "::warning::Checkov did not produce results.sarif — writing a minimal empty SARIF so the upload step stays wired."
+          CANONICAL="${{ github.workspace }}/results.sarif"
+          cat > "$CANONICAL" <<'SARIF_EOF'
+        {
+          "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+          "version": "2.1.0",
+          "runs": [
+            {
+              "tool": { "driver": { "name": "Checkov", "rules": [] } },
+              "results": []
+            }
+          ]
+        }
+        SARIF_EOF
+          echo "sarif_path=$CANONICAL" >> $GITHUB_OUTPUT
+          echo "found=true" >> $GITHUB_OUTPUT
+          echo "empty_stub=true" >> $GITHUB_OUTPUT
         fi
 
     - name: Debug Checkov Scan Output
@@ -278,6 +314,11 @@ runs:
         fi
         echo "::endgroup::"
 
+    # Node 20 deprecation warnings from actions/checkout@v4, actions/upload-artifact@v4,
+    # actions/download-artifact@v4 that surface on runs come from codeql-action@v4's
+    # own internals (it pins those versions itself). GitHub is already force-running
+    # them on Node 24, so the warnings are benign. v4 is codeql-action's current
+    # latest major — there is no v5 to bump to. Revisit when codeql-action publishes v5.
     - name: Upload SARIF file
       uses: github/codeql-action/upload-sarif@v4
       if: (success() || failure()) && steps.locate-sarif.outputs.found == 'true'

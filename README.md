@@ -12,7 +12,7 @@
 
 1. **Pulls the enabled check-ID catalog** from a central gist and renders it to the job summary.
 2. **Runs Checkov** against the specified directory (or plan JSON file) and framework.
-3. **Generates SARIF output** and uploads it to GitHub Code Scanning (Security tab) via `github/codeql-action/upload-sarif@v5`.
+3. **Generates SARIF output** and uploads it to GitHub Code Scanning (Security tab) via `github/codeql-action/upload-sarif@v4`.
 
 > **Caller responsibility:** this action does **not** run `actions/checkout`. Your workflow must check out the repo (and download any plan-file artifact) **before** invoking this action. An inner checkout would `git clean -ffdx` the workspace and delete downloaded artifacts.
 
@@ -22,6 +22,7 @@
 
 | Name               | Required | Default            | Description                                                                                                                         |
 |--------------------|----------|--------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| `release-tag`      | No       | —                  | **Deprecated, ignored.** Retained so callers don't hit "Unexpected input(s)"; remove from your workflow — caller now owns `actions/checkout`. |
 | `iac-dir`          | Yes      | `iac`              | Directory path where the IaC templates are located. Ignored when `plan-file` is set.                                                |
 | `iac-framework`    | Yes      | `terraform`        | IaC framework for Checkov (`cloudformation`, `terraform`, `kubernetes`, etc.). Ignored when `plan-file` is set.                     |
 | `plan-file`        | No       | —                  | Path (relative to the workspace) to a Terraform plan JSON. If set, Checkov scans this file using framework `terraform_plan`.        |
