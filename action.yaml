@@ -296,6 +296,74 @@ runs:
           echo "empty_stub=true" >> $GITHUB_OUTPUT
         fi
 
+    - name: "Checkov Scan Report (findings-aware summary)"
+      id: checkov-summary
+      if: success() || failure()
+      shell: bash
+      env:
+        SARIF_PATH: ${{ steps.locate-sarif.outputs.sarif_path }}
+        EMPTY_STUB: ${{ steps.locate-sarif.outputs.empty_stub }}
+      run: |
+        # Writes the REAL findings count to the job summary. Overrides any
+        # misleading "All checks passed" summary produced by caller-side steps
+        # that only check the Checkov step's exit code (which is always success
+        # when soft-fail is true).
+        {
+          echo ""
+          echo "## 🛡️ Checkov Scan Report"
+          echo ""
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [[ "${EMPTY_STUB}" == "true" ]]; then
+          {
+            echo "⚠️ **Checkov did not produce a SARIF file.** A minimal empty SARIF was substituted so the upload step stays wired, but no findings data is available. Check the 'Debug: List Checkov output directory' step for clues."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+
+        if [[ ! -f "${SARIF_PATH}" ]]; then
+          echo "❓ SARIF file missing at '${SARIF_PATH}'." >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+
+        TOTAL=$(jq '[.runs[].results[]] | length' "${SARIF_PATH}")
+        # SARIF severity lives in .runs[].results[].level (error|warning|note|none)
+        ERRORS=$(jq   '[.runs[].results[] | select(.level=="error")]   | length' "${SARIF_PATH}")
+        WARNINGS=$(jq '[.runs[].results[] | select(.level=="warning")] | length' "${SARIF_PATH}")
+        NOTES=$(jq    '[.runs[].results[] | select(.level=="note")]    | length' "${SARIF_PATH}")
+
+        if [[ "${TOTAL}" -eq 0 ]]; then
+          echo "✅ **All checks passed — no findings.**" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+
+        {
+          echo "❌ **${TOTAL} finding(s) detected.**"
+          echo ""
+          echo "| Severity | Count |"
+          echo "|----------|------:|"
+          echo "| error    | ${ERRORS} |"
+          echo "| warning  | ${WARNINGS} |"
+          echo "| note     | ${NOTES} |"
+          echo ""
+          echo "### Findings"
+          echo ""
+          echo "| Rule | Level | File | Line | Message |"
+          echo "|------|-------|------|-----:|---------|"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        jq -r '
+          .runs[].results[]
+          | [
+              (.ruleId // "?"),
+              (.level // "?"),
+              (.locations[0].physicalLocation.artifactLocation.uri // "?"),
+              ((.locations[0].physicalLocation.region.startLine // 0) | tostring),
+              ((.message.text // "") | gsub("\\|"; "\\|") | gsub("\n"; " "))
+            ]
+          | "| `\(.[0])` | \(.[1]) | `\(.[2])` | \(.[3]) | \(.[4]) |"
+        ' "${SARIF_PATH}" >> "$GITHUB_STEP_SUMMARY"
+
     - name: Debug Checkov Scan Output
       if: success() || failure()
       shell: bash
