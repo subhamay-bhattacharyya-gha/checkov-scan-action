@@ -72,6 +72,38 @@ runs:
       with:
         ref: ${{ steps.set-ref.outputs.ref }}
 
+    - name: "Debug: Print Action Inputs"
+      id: debug-inputs
+      shell: bash
+      run: |
+        echo "::group::Action inputs"
+        echo "release-tag:       ${{ inputs.release-tag }}"
+        echo "resolved ref:      ${{ steps.set-ref.outputs.ref }}"
+        echo "iac-dir:           ${{ inputs.iac-dir }}"
+        echo "iac-framework:     ${{ inputs.iac-framework }}"
+        echo "plan-file:         ${{ inputs.plan-file }}"
+        echo "output-file-path:  ${{ inputs.output-file-path }}"
+        echo "soft-fail:         ${{ inputs.soft-fail }}"
+        echo "github.workspace:  ${{ github.workspace }}"
+        echo "::endgroup::"
+
+        PLAN_FILE="${{ inputs.plan-file }}"
+        if [[ -n "${PLAN_FILE}" ]]; then
+          PLAN_PATH="${{ github.workspace }}/${PLAN_FILE}"
+          echo "::group::Plan JSON contents (${PLAN_PATH})"
+          if [[ -f "${PLAN_PATH}" ]]; then
+            echo "Size: $(wc -c < "${PLAN_PATH}") bytes"
+            if command -v jq >/dev/null 2>&1; then
+              jq '.' "${PLAN_PATH}"
+            else
+              cat "${PLAN_PATH}"
+            fi
+          else
+            echo "::warning::plan-file '${PLAN_PATH}' not found on disk"
+          fi
+          echo "::endgroup::"
+        fi
+
     - name: Ensure results.sarif is clean
       id: clean-results
       shell: bash
