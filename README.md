@@ -23,7 +23,7 @@
 | Name               | Required | Default            | Description                                                                                                                         |
 |--------------------|----------|--------------------|-------------------------------------------------------------------------------------------------------------------------------------|
 | `release-tag`      | No       | —                  | **Deprecated, ignored.** Retained so callers don't hit "Unexpected input(s)"; remove from your workflow — caller now owns `actions/checkout`. |
-| `iac-dir`          | Yes      | `iac`              | Directory path where the IaC templates are located. Ignored when `plan-file` is set.                                                |
+| `iac-dir`          | Yes      | `iac`              | Directory containing the IaC templates. For directory scans, this is what gets scanned. For `plan-file` scans, this is also used as the source dir for plan enrichment (source file paths / line numbers / code snippets in the SARIF). |
 | `iac-framework`    | Yes      | `terraform`        | IaC framework for Checkov (`cloudformation`, `terraform`, `kubernetes`, etc.). Ignored when `plan-file` is set.                     |
 | `plan-file`        | No       | —                  | Path (relative to the workspace) to a Terraform plan JSON. If set, Checkov scans this file using framework `terraform_plan`.        |
 | `output-file-path` | No       | `/github/workspace`| Directory where Checkov writes `results.sarif`. Must be accessible from inside the Checkov container.                               |
@@ -96,12 +96,20 @@ jobs:
         uses: subhamay-bhattacharyya-gha/checkov-scan-action@main
         with:
           plan-file: infra/platform/tf/tfplan.json
+          # iac-dir still matters here: it's used as the plan-enrichment
+          # source dir so SARIF findings carry .tf file paths, line numbers,
+          # and code snippets instead of pointing at tfplan.json.
+          iac-dir: infra/platform/tf
           soft-fail: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-When `plan-file` is provided, `iac-dir` and `iac-framework` are ignored and
-Checkov runs with `framework=terraform_plan`.
+When `plan-file` is provided, Checkov runs with `framework=terraform_plan`.
+`iac-framework` is ignored, but **`iac-dir` should point at the original
+Terraform source directory** so Checkov can enrich findings with real file
+paths, line numbers, and code snippets via `--repo-root-for-plan-enrichment`.
+Without this, summary panels that render the "Code Snippet" field will be
+empty because findings are attributed to the single-line `tfplan.json`.
 
 ### 3. Custom SARIF output location
 

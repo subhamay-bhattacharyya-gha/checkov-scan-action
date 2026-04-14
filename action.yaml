@@ -237,6 +237,18 @@ runs:
             exit 1
           fi
           ARGS+=(--framework terraform_plan --file "${PLAN_PATH}")
+
+          # Enrich plan findings with references to the original .tf source
+          # files (file path, line numbers, and code snippets in SARIF
+          # locations). Without this, every finding points at the single-line
+          # tfplan.json and the 'Code Snippet' panel in summaries is empty.
+          TF_SOURCE_DIR="${GITHUB_WORKSPACE}/${IAC_DIR_INPUT}"
+          if [[ -d "${TF_SOURCE_DIR}" ]] && ls "${TF_SOURCE_DIR}"/*.tf >/dev/null 2>&1; then
+            ARGS+=(--repo-root-for-plan-enrichment "${TF_SOURCE_DIR}")
+            echo "Enriching plan findings with source from: ${TF_SOURCE_DIR}"
+          else
+            echo "::warning::Plan-file scan: no .tf sources found at '${TF_SOURCE_DIR}'. SARIF findings will not include code snippets. Set iac-dir to the directory containing the .tf files the plan was generated from."
+          fi
           echo "Scanning plan file: ${PLAN_PATH}"
         else
           ARGS+=(--framework "${IAC_FRAMEWORK_INPUT}" --directory "${GITHUB_WORKSPACE}/${IAC_DIR_INPUT}")
