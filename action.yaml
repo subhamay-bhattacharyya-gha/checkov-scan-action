@@ -428,3 +428,15 @@ runs:
       with:
         sarif_file: ${{ steps.locate-sarif.outputs.sarif_path }}
         token: ${{ inputs.github-token }}
+
+    # Also expose the SARIF as a workflow artifact so it can be downloaded
+    # from the run page even when the branch hasn't been indexed by Code
+    # Scanning yet (e.g. feature branches before they merge to main).
+    - name: Publish SARIF as workflow artifact
+      uses: actions/upload-artifact@v7
+      if: (success() || failure()) && steps.locate-sarif.outputs.found == 'true'
+      with:
+        name: checkov-sarif
+        path: ${{ steps.locate-sarif.outputs.sarif_path }}
+        retention-days: 14
+        if-no-files-found: warn
