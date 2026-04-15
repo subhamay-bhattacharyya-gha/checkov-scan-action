@@ -3,9 +3,10 @@ description: "Reusable GitHub Action to run Checkov against a specified IaC dire
 
 inputs:
   release-tag:
-    description: "Git release tag to check out. If omitted, the latest commit on the default branch is used."
+    description: "DEPRECATED and ignored. This action no longer runs its own actions/checkout (doing so wiped downloaded plan-file artifacts). The caller is responsible for checkout. The input is retained only to avoid 'Unexpected input(s)' warnings in callers that still pass it; remove it from your workflow when convenient."
     required: false
     type: string
+    default: ""
 
   iac-dir:
     description: "The directory path of the IAC file."
@@ -17,7 +18,19 @@ inputs:
     description: "IAC Framework - Accepted values: cloudformation, terraform, kubernetes etc."
     required: true
     type: string
-    default: "cloudformation"
+    default: "terraform"
+
+  plan-file:
+    description: "Path (relative to the workspace) to a Terraform plan JSON file. If set, Checkov scans this file with framework 'terraform_plan' instead of scanning 'iac-dir'."
+    required: false
+    type: string
+    default: ""
+
+  output-file-path:
+    description: "DEPRECATED and ignored. This action now runs the checkov CLI directly and writes SARIF to a deterministic location under $GITHUB_WORKSPACE; it then copies it to $GITHUB_WORKSPACE/results.sarif for downstream steps. Retained only so existing callers don't hit 'Unexpected input(s)'."
+    required: false
+    type: string
+    default: ""
 
   soft-fail:
     description: "If true, Checkov scan will not fail the pipeline"
@@ -25,24 +38,53 @@ inputs:
     type: boolean
     default: true
 
+  github-token:
+    description: "GitHub token used for API calls (pass secrets.GITHUB_TOKEN from the caller workflow)."
+    required: true
+    type: string
+
 runs:
   using: "composite"
   steps:
-    - name: "Set Checkout Ref"
-      id: set-ref
+    # NOTE: This action intentionally does NOT run actions/checkout. The caller
+    # workflow is responsible for checking out the repo (and downloading any
+    # plan-file artifact) before invoking this action. Running checkout here
+    # with its default `clean: true` would `git clean -ffdx` the workspace and
+    # delete downloaded artifacts such as a Terraform plan JSON, causing
+    # terraform_plan scans to silently return 0 findings.
+
+    - name: "Debug: Print Action Inputs"
+      id: debug-inputs
       shell: bash
       run: |
+        echo "::group::Action inputs"
         if [[ -n "${{ inputs.release-tag }}" ]]; then
-          echo "ref=${{ inputs.release-tag }}" >> $GITHUB_OUTPUT
-        else
-          echo "ref=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          echo "::warning::'release-tag' input is deprecated and ignored. Remove it from the caller workflow; checkout is now the caller's responsibility."
         fi
+        echo "iac-dir:           ${{ inputs.iac-dir }}"
+        echo "iac-framework:     ${{ inputs.iac-framework }}"
+        echo "plan-file:         ${{ inputs.plan-file }}"
+        echo "output-file-path:  ${{ inputs.output-file-path }}"
+        echo "soft-fail:         ${{ inputs.soft-fail }}"
+        echo "github.workspace:  ${{ github.workspace }}"
+        echo "::endgroup::"
 
-    - name: "Checkout Repo"
-      id: checkout
-      uses: actions/checkout@v6
-      with:
-        ref: ${{ steps.set-ref.outputs.ref }}
+        PLAN_FILE="${{ inputs.plan-file }}"
+        if [[ -n "${PLAN_FILE}" ]]; then
+          PLAN_PATH="${{ github.workspace }}/${PLAN_FILE}"
+          echo "::group::Plan JSON contents (${PLAN_PATH})"
+          if [[ -f "${PLAN_PATH}" ]]; then
+            echo "Size: $(wc -c < "${PLAN_PATH}") bytes"
+            if command -v jq >/dev/null 2>&1; then
+              jq '.' "${PLAN_PATH}"
+            else
+              cat "${PLAN_PATH}"
+            fi
+          else
+            echo "::warning::plan-file '${PLAN_PATH}' not found on disk"
+          fi
+          echo "::endgroup::"
+        fi
 
     - name: Ensure results.sarif is clean
       id: clean-results
@@ -53,13 +95,348 @@ runs:
           rm -rf results.sarif
         fi
 
+    # Custom Checkov Scan Detector step to determine if a scan should be run based on the presence of IaC files in the specified directory.
+    # This will be implemented as a separate action in the future, but for now it's included here as a placeholder to demonstrate the intended functionality.
+    # ------------------
+    # - name: Run Terraform Checkov Scan Detector
+    #   id: checkov-scan-detector
+    #   continue-on-error: true
+    #   uses: subhamay-bhattacharyya-gha/terraform-checkov-scan-detector/.github/actions/tf-scanner@bug/GHA-0004-fix-resolve-missing-actio
+    #   with:
+    #     terraform_dir: ${{ github.workspace }}/${{ inputs.iac-dir }}
+    #     github_token: ${{ inputs.github-token }}
+
+    # - name: Debug Checkov Scan Detector Output
+    #   shell: bash
+    #   env:
+    #     DETECTOR_OUTPUTS: ${{ toJSON(steps.checkov-scan-detector.outputs) }}
+    #   run: |
+    #     echo "::group::checkov-scan-detector outputs"
+    #     echo "outcome: ${{ steps.checkov-scan-detector.outcome }}"
+    #     echo "conclusion: ${{ steps.checkov-scan-detector.conclusion }}"
+    #     echo "All outputs: ${DETECTOR_OUTPUTS}"
+    #     echo "::endgroup::"
+
+    #     echo "## Checkov Scan Detector" >> $GITHUB_STEP_SUMMARY
+    #     echo "" >> $GITHUB_STEP_SUMMARY
+    #     echo "| Property   | Value |" >> $GITHUB_STEP_SUMMARY
+    #     echo "|------------|-------|" >> $GITHUB_STEP_SUMMARY
+    #     echo "| Outcome    | \`${{ steps.checkov-scan-detector.outcome }}\` |" >> $GITHUB_STEP_SUMMARY
+    #     echo "| Conclusion | \`${{ steps.checkov-scan-detector.conclusion }}\` |" >> $GITHUB_STEP_SUMMARY
+    #     echo "" >> $GITHUB_STEP_SUMMARY
+    #     echo "<details>" >> $GITHUB_STEP_SUMMARY
+    #     echo "<summary>All Outputs</summary>" >> $GITHUB_STEP_SUMMARY
+    #     echo "" >> $GITHUB_STEP_SUMMARY
+    #     echo '```json' >> $GITHUB_STEP_SUMMARY
+    #     echo "${DETECTOR_OUTPUTS}" >> $GITHUB_STEP_SUMMARY
+    #     echo '```' >> $GITHUB_STEP_SUMMARY
+    #     echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+    - name: "Retrieve Gist Content"
+      id: pull_gist
+      shell: bash
+      run: |
+        CONTENT=$(curl -s \
+          "https://gist.githubusercontent.com/bsubhamay/33218d3610939502b8fe69ee4858c575/raw/enabled-checkov-scans-ids.json")
+        echo "Scan ID from Gist: $CONTENT"
+        {
+          echo "gist_content<<GIST_EOF"
+          echo "$CONTENT"
+          echo "GIST_EOF"
+        } >> $GITHUB_OUTPUT
+
+    - name: "Print Enabled Checkov Scan IDs"
+      id: print_checkov_ids
+      shell: bash
+      run: |
+        CONTENT='${{ steps.pull_gist.outputs.gist_content }}'
+        # Extract all check IDs from the nested JSON
+        IDS=$(echo "$CONTENT" | jq -r '.. | arrays | .[]' | sort -u)
+
+        # Install checkov to retrieve check descriptions
+        pip install -q checkov > /dev/null 2>&1
+
+        # Get the checkov check list filtered by framework. When a plan file is used,
+        # list against the underlying 'terraform' framework (terraform_plan shares the catalog).
+        if [[ -n "${{ inputs.plan-file }}" ]]; then
+          FRAMEWORK="terraform"
+        else
+          FRAMEWORK="${{ inputs.iac-framework }}"
+        fi
+        CHECKOV_LIST=$(checkov --list --framework "$FRAMEWORK" 2>/dev/null)
+
+        # Build a single table with all checks
+        echo "## Enabled Checkov Scans" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| # | Cloud | Service | Check Id | Description |" >> $GITHUB_STEP_SUMMARY
+        echo "|--:|-------|---------|----------|-------------|" >> $GITHUB_STEP_SUMMARY
+
+        COUNT=0
+        for CLOUD in $(echo "$CONTENT" | jq -r 'keys[]'); do
+          for SERVICE in $(echo "$CONTENT" | jq -r --arg c "$CLOUD" '.[$c] | keys[]'); do
+            for ID in $(echo "$CONTENT" | jq -r --arg c "$CLOUD" --arg s "$SERVICE" '.[$c][$s][]'); do
+              DESC=$(echo "$CHECKOV_LIST" | grep "$ID" | sed -n "1s/.*${ID}[[:space:]]*//p" | sed 's/|//g' | xargs)
+              if [ -z "$DESC" ]; then
+                DESC="N/A"
+              fi
+              COUNT=$((COUNT + 1))
+              echo "| ${COUNT} | ${CLOUD} | ${SERVICE} | \`${ID}\` | ${DESC} |" >> $GITHUB_STEP_SUMMARY
+            done
+          done
+        done
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Total: ${COUNT} check(s) enabled**" >> $GITHUB_STEP_SUMMARY
+
+        # Build comma-separated list of all check IDs
+        CHECK_IDS=$(echo "$CONTENT" | jq -r '[.. | arrays | .[]] | unique | join(",")')
+        echo "check_ids=$CHECK_IDS" >> $GITHUB_OUTPUT
+        echo "Enabled Check IDs: $CHECK_IDS"
+
     - name: "Run Checkov Scan"
       id: checkov-scan
-      uses: bridgecrewio/checkov-action@master
+      shell: bash
+      # Invokes the checkov CLI directly instead of bridgecrewio/checkov-action.
+      # The Docker-wrapped action has proven unreliable about honoring
+      # output_file_path (SARIF was silently not written even when annotations
+      # showed findings). Running checkov on the runner gives us a deterministic
+      # output path and removes the container/workspace path-mapping ambiguity.
+      # checkov was already installed by the 'Print Enabled Checkov Scan IDs'
+      # step above.
+      env:
+        PLAN_FILE_INPUT: ${{ inputs.plan-file }}
+        IAC_DIR_INPUT: ${{ inputs.iac-dir }}
+        IAC_FRAMEWORK_INPUT: ${{ inputs.iac-framework }}
+        SOFT_FAIL_INPUT: ${{ inputs.soft-fail }}
+        CHECK_IDS: ${{ steps.print_checkov_ids.outputs.check_ids }}
+      run: |
+        set +e   # checkov exits non-zero on findings; we handle that ourselves.
+
+        OUT_DIR="${GITHUB_WORKSPACE}/.checkov-out"
+        rm -rf "${OUT_DIR}"
+        mkdir -p "${OUT_DIR}"
+
+        ARGS=(
+          --output sarif
+          --output-file-path "${OUT_DIR}"
+          --download-external-modules true
+        )
+
+        if [[ -n "${CHECK_IDS}" ]]; then
+          ARGS+=(--check "${CHECK_IDS}")
+        fi
+
+        if [[ "${SOFT_FAIL_INPUT}" == "true" ]]; then
+          ARGS+=(--soft-fail)
+        fi
+
+        if [[ -n "${PLAN_FILE_INPUT}" ]]; then
+          PLAN_PATH="${GITHUB_WORKSPACE}/${PLAN_FILE_INPUT}"
+          if [[ ! -f "${PLAN_PATH}" ]]; then
+            echo "::error::plan-file '${PLAN_PATH}' not found on disk"
+            exit 1
+          fi
+          ARGS+=(--framework terraform_plan --file "${PLAN_PATH}")
+
+          # Enrich plan findings with references to the original .tf source
+          # files (file path, line numbers, and code snippets in SARIF
+          # locations). Without this, every finding points at the single-line
+          # tfplan.json and the 'Code Snippet' panel in summaries is empty.
+          TF_SOURCE_DIR="${GITHUB_WORKSPACE}/${IAC_DIR_INPUT}"
+          if [[ -d "${TF_SOURCE_DIR}" ]] && ls "${TF_SOURCE_DIR}"/*.tf >/dev/null 2>&1; then
+            ARGS+=(--repo-root-for-plan-enrichment "${TF_SOURCE_DIR}")
+            echo "Enriching plan findings with source from: ${TF_SOURCE_DIR}"
+          else
+            echo "::warning::Plan-file scan: no .tf sources found at '${TF_SOURCE_DIR}'. SARIF findings will not include code snippets. Set iac-dir to the directory containing the .tf files the plan was generated from."
+          fi
+          echo "Scanning plan file: ${PLAN_PATH}"
+        else
+          ARGS+=(--framework "${IAC_FRAMEWORK_INPUT}" --directory "${GITHUB_WORKSPACE}/${IAC_DIR_INPUT}")
+          echo "Scanning directory: ${GITHUB_WORKSPACE}/${IAC_DIR_INPUT}"
+        fi
+
+        echo "::group::checkov invocation"
+        echo "checkov ${ARGS[@]}"
+        echo "::endgroup::"
+
+        checkov "${ARGS[@]}"
+        CHECKOV_EXIT=$?
+        echo "checkov_exit_code=${CHECKOV_EXIT}" >> "$GITHUB_OUTPUT"
+        echo "checkov exited with ${CHECKOV_EXIT}"
+
+        # With --soft-fail, checkov returns 0. Without it, non-zero indicates
+        # findings — still a successful run, not an error to abort on.
+        exit 0
+
+    - name: "Debug: List Checkov output directory"
+      if: success() || failure()
+      shell: bash
+      run: |
+        OUT="${GITHUB_WORKSPACE}/.checkov-out"
+        echo "::group::Contents of ${OUT}"
+        if [[ -d "${OUT}" ]]; then
+          find "${OUT}" -maxdepth 3 -printf '%y %p (%s bytes)\n' 2>/dev/null || find "${OUT}" -maxdepth 3
+        else
+          echo "(directory does not exist — checkov did not run or failed before writing)"
+        fi
+        echo "::endgroup::"
+
+    - name: Locate SARIF file
+      id: locate-sarif
+      if: success() || failure()
+      shell: bash
+      run: |
+        # Direct CLI writes to <OUT_DIR>/results_sarif/results.sarif deterministically.
+        OUT_DIR="${GITHUB_WORKSPACE}/.checkov-out"
+        CANONICAL="${GITHUB_WORKSPACE}/results.sarif"
+
+        SARIF_FILE=""
+        for CANDIDATE in \
+          "${OUT_DIR}/results_sarif/results.sarif" \
+          "${OUT_DIR}/sarif/results.sarif" \
+          "${OUT_DIR}/results.sarif"; do
+          if [[ -f "${CANDIDATE}" ]]; then
+            SARIF_FILE="${CANDIDATE}"
+            break
+          fi
+        done
+
+        # Final safety net: search the output dir tree for any *.sarif
+        if [[ -z "${SARIF_FILE}" && -d "${OUT_DIR}" ]]; then
+          SARIF_FILE=$(find "${OUT_DIR}" -name '*.sarif' -type f 2>/dev/null | head -1)
+        fi
+
+        if [[ -n "${SARIF_FILE}" ]]; then
+          cp "${SARIF_FILE}" "${CANONICAL}"
+          RESULT_COUNT=$(jq '[.runs[].results[]] | length' "${CANONICAL}" 2>/dev/null || echo "?")
+          echo "sarif_path=${CANONICAL}" >> "$GITHUB_OUTPUT"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "SARIF: ${SARIF_FILE} -> ${CANONICAL} ($(wc -c < "${CANONICAL}") bytes, ${RESULT_COUNT} results)"
+        else
+          echo "::warning::Checkov did not produce a SARIF file under ${OUT_DIR}. Writing an empty stub so upload-sarif stays wired."
+          cat > "${CANONICAL}" <<'SARIF_EOF'
+        {
+          "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+          "version": "2.1.0",
+          "runs": [
+            {
+              "tool": { "driver": { "name": "Checkov", "rules": [] } },
+              "results": []
+            }
+          ]
+        }
+        SARIF_EOF
+          echo "sarif_path=${CANONICAL}" >> "$GITHUB_OUTPUT"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "empty_stub=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: "Checkov Scan Report (findings-aware summary)"
+      id: checkov-summary
+      if: success() || failure()
+      shell: bash
+      env:
+        SARIF_PATH: ${{ steps.locate-sarif.outputs.sarif_path }}
+        EMPTY_STUB: ${{ steps.locate-sarif.outputs.empty_stub }}
+      run: |
+        # Writes the REAL findings count to the job summary. Overrides any
+        # misleading "All checks passed" summary produced by caller-side steps
+        # that only check the Checkov step's exit code (which is always success
+        # when soft-fail is true).
+        {
+          echo ""
+          echo "## 🛡️ Checkov Scan Report"
+          echo ""
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [[ "${EMPTY_STUB}" == "true" ]]; then
+          {
+            echo "⚠️ **Checkov did not produce a SARIF file.** A minimal empty SARIF was substituted so the upload step stays wired, but no findings data is available. Check the 'Debug: List Checkov output directory' step for clues."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+
+        if [[ ! -f "${SARIF_PATH}" ]]; then
+          echo "❓ SARIF file missing at '${SARIF_PATH}'." >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+
+        TOTAL=$(jq '[.runs[].results[]] | length' "${SARIF_PATH}")
+        # SARIF severity lives in .runs[].results[].level (error|warning|note|none)
+        ERRORS=$(jq   '[.runs[].results[] | select(.level=="error")]   | length' "${SARIF_PATH}")
+        WARNINGS=$(jq '[.runs[].results[] | select(.level=="warning")] | length' "${SARIF_PATH}")
+        NOTES=$(jq    '[.runs[].results[] | select(.level=="note")]    | length' "${SARIF_PATH}")
+
+        if [[ "${TOTAL}" -eq 0 ]]; then
+          echo "✅ **All checks passed — no findings.**" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+
+        {
+          echo "❌ **${TOTAL} finding(s) detected.**"
+          echo ""
+          echo "| Severity | Count |"
+          echo "|----------|------:|"
+          echo "| error    | ${ERRORS} |"
+          echo "| warning  | ${WARNINGS} |"
+          echo "| note     | ${NOTES} |"
+          echo ""
+          echo "### Findings"
+          echo ""
+          echo "| Rule | Level | File | Line | Message |"
+          echo "|------|-------|------|-----:|---------|"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        jq -r '
+          .runs[].results[]
+          | [
+              (.ruleId // "?"),
+              (.level // "?"),
+              (.locations[0].physicalLocation.artifactLocation.uri // "?"),
+              ((.locations[0].physicalLocation.region.startLine // 0) | tostring),
+              ((.message.text // "") | gsub("\\|"; "\\|") | gsub("\n"; " "))
+            ]
+          | "| `\(.[0])` | \(.[1]) | `\(.[2])` | \(.[3]) | \(.[4]) |"
+        ' "${SARIF_PATH}" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Debug Checkov Scan Output
+      if: success() || failure()
+      shell: bash
+      env:
+        SCAN_OUTPUTS: ${{ toJSON(steps.checkov-scan.outputs) }}
+      run: |
+        echo "::group::checkov-scan outputs"
+        echo "outcome: ${{ steps.checkov-scan.outcome }}"
+        echo "conclusion: ${{ steps.checkov-scan.conclusion }}"
+        echo "All outputs: ${SCAN_OUTPUTS}"
+        echo "SARIF found: ${{ steps.locate-sarif.outputs.found }}"
+        echo "SARIF path: ${{ steps.locate-sarif.outputs.sarif_path }}"
+        if [ -f "${{ steps.locate-sarif.outputs.sarif_path }}" ]; then
+          echo "results.sarif preview (first 50 lines):"
+          head -50 "${{ steps.locate-sarif.outputs.sarif_path }}"
+        fi
+        echo "::endgroup::"
+
+    # Node 20 deprecation warnings from actions/checkout@v4, actions/upload-artifact@v4,
+    # actions/download-artifact@v4 that surface on runs come from codeql-action@v4's
+    # own internals (it pins those versions itself). GitHub is already force-running
+    # them on Node 24, so the warnings are benign. v4 is codeql-action's current
+    # latest major — there is no v5 to bump to. Revisit when codeql-action publishes v5.
+    - name: Upload SARIF file
+      uses: github/codeql-action/upload-sarif@v4
+      if: (success() || failure()) && steps.locate-sarif.outputs.found == 'true'
       with:
-        directory: ${{ github.workspace }}/${{ inputs.iac-dir }}
-        soft_fail: ${{ inputs.soft-fail }}
-        quiet: "true"
-        framework: ${{ inputs.iac-framework }}
-        # Output file for SARIF format, must be named as results.sarif for the report action to work
-        output_format: "sarif"
+        sarif_file: ${{ steps.locate-sarif.outputs.sarif_path }}
+        token: ${{ inputs.github-token }}
+
+    # Also expose the SARIF as a workflow artifact so it can be downloaded
+    # from the run page even when the branch hasn't been indexed by Code
+    # Scanning yet (e.g. feature branches before they merge to main).
+    - name: Publish SARIF as workflow artifact
+      uses: actions/upload-artifact@v7
+      if: (success() || failure()) && steps.locate-sarif.outputs.found == 'true'
+      with:
+        name: checkov-sarif
+        path: ${{ steps.locate-sarif.outputs.sarif_path }}
+        retention-days: 14
+        if-no-files-found: warn
